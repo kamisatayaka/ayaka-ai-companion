@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+Thumbs.db
+
+# 音色克隆工作区（模型/虚拟环境/音频切片体积太大，不上传；保留说明文档）
+voice-clone/*
+!voice-clone/README.md

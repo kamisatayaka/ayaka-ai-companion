@@ -1,0 +1,30 @@
+{
+  "name": "ayaka-ai-companion",
+  "productName": "神里绫华 AI 陪伴",
+  "version": "0.1.0",
+  "description": "AI 桌面陪伴练手项目（MVP：角色聊天）——神里绫华",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "test:memory": "node scripts/test-memory.mjs",
+    "test:tts": "node scripts/test-tts.mjs",
+    "test:stt": "node scripts/test-stt.mjs"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^37.0.0",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1",
+    "ws": "^8.21.3"
+  }
+}

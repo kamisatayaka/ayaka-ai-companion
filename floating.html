@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html, body {
+        margin: 0;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+      }
+      .bubble {
+        width: 72px;
+        height: 72px;
+        margin: 6px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 25%, #a98fe0, #5b4a9c);
+        box-shadow: 0 4px 18px rgba(91, 74, 156, 0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 30px;
+        color: #fff;
+        font-weight: 700;
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        cursor: pointer;
+        position: relative;
+      }
+      .dot {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        background: #7d758f;
+      }
+      .dot.online {
+        background: #7ee0a3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bubble" id="bubble">绫<span class="dot" id="dot"></span></div>
+    <script type="module" src="./floating.js"></script>
+  </body>
+</html>
