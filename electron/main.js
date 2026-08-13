@@ -112,7 +112,12 @@ const BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1').
 const MODEL = process.env.OPENAI_MODEL || 'deepseek-chat'
 
 function hasApiKey() {
-  return !!(process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY)
+  return !!(
+    process.env.OPENAI_API_KEY ||
+    process.env.DEEPSEEK_API_KEY ||
+    // 本地模型（Ollama 等）不需要 Key，指向 localhost 即视为已连接
+    /localhost|127\.0\.0\.1/.test(process.env.OPENAI_BASE_URL || '')
+  )
 }
 
 async function callOpenAICompatible(
@@ -124,12 +129,11 @@ async function callOpenAICompatible(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (key) headers.Authorization = `Bearer ${key}`
     const res = await fetch(`${BASE_URL}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
+      headers,
       body: JSON.stringify({
         model: MODEL,
         messages: apiMessages,
