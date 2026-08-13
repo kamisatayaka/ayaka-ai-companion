@@ -144,6 +144,17 @@ body {
   color: var(--text);
 }
 
+.memory-tag {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid rgba(201, 167, 255, 0.35);
+  border-radius: 6px;
+  padding: 0 6px;
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+
 .memory-empty {
   color: var(--text-dim);
 }

@@ -9,6 +9,15 @@ const IDLE_BEFORE_FIRST_MS = 45_000
 const IDLE_AFTER_CHAT_MS = 45_000
 const IDLE_AFTER_PROACTIVE_MS = 180_000
 
+const CATEGORY_LABELS = {
+  identity: '身份',
+  preference: '喜好',
+  date: '日期',
+  relationship: '关系',
+  status: '状态',
+  other: '其他'
+}
+
 function greeting() {
   const h = new Date().getHours()
   const part = h < 5 ? '夜深了' : h < 12 ? '早上好' : h < 18 ? '下午好' : '晚上好'
@@ -283,7 +292,12 @@ export default function App() {
           {memories.length === 0 ? (
             <div className="memory-empty">还没有记忆。多聊几句，她会慢慢记住关于你的事。</div>
           ) : (
-            memories.map((m) => <div className="memory-item" key={m.id}>• {m.text}</div>)
+            memories.map((m) => (
+              <div className="memory-item" key={m.id}>
+                <span className="memory-tag">{CATEGORY_LABELS[m.category] || '其他'}</span>
+                {m.text}
+              </div>
+            ))
           )}
         </div>
       )}

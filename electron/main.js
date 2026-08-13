@@ -8,7 +8,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { buildSystemPrompt, buildFewShotMessages } from '../src/shared/character.js'
 import { buildExtractPrompt } from '../src/shared/memoryPrompt.js'
-import { applyOps } from '../src/shared/memory.js'
+import { applyOps, guessCategory } from '../src/shared/memory.js'
 import { stripStageDirections } from '../src/shared/ttsFilter.js'
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
@@ -27,8 +27,13 @@ function readJson(file) {
 function loadMemory() {
   try {
     const data = readJson(memoryFile())
+    // 老数据迁移：没有分类的记忆按文本补一个，保证身份信息也走「最新为准」规则
+    const facts = (Array.isArray(data.facts) ? data.facts : []).map((f) => ({
+      ...f,
+      category: f.category || guessCategory(f.text || '')
+    }))
     return {
-      facts: Array.isArray(data.facts) ? data.facts : [],
+      facts,
       processedUserCount: Number(data.processedUserCount) || 0
     }
   } catch {
@@ -162,7 +167,17 @@ async function extractFacts(messages, currentFacts = []) {
   const parsed = JSON.parse(cleaned)
   return {
     add: Array.isArray(parsed.add)
-      ? parsed.add.map(String).map((s) => s.trim()).filter(Boolean)
+      ? parsed.add
+          .filter((it) =>
+            typeof it === 'string'
+              ? it.trim()
+              : it && String(it.text || '').trim()
+          )
+          .map((it) =>
+            typeof it === 'string'
+              ? it.trim()
+              : { ...it, text: String(it.text).trim() }
+          )
       : [],
     remove: Array.isArray(parsed.remove)
       ? parsed.remove.map(String).map((s) => s.trim()).filter(Boolean)

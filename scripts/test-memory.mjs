@@ -49,12 +49,12 @@ console.log(personaReply)
 
 console.log('=== 2. 记忆整理测试（add/remove 对账） ===')
 const sample = [
-  { role: 'user', content: '我叫小周，以后叫我阿周就行。' },
-  { role: 'assistant', content: '好的，阿周。' },
+  { role: 'user', content: '我叫小明。' },
+  { role: 'assistant', content: '好的，小明。' },
+  { role: 'user', content: '不对，你叫我小红吧。' },
+  { role: 'assistant', content: '嗯，小红。' },
   { role: 'user', content: '我最喜欢下雨天了。' },
   { role: 'assistant', content: '雨天正好，稻妻的雨声最衬茶香。' },
-  { role: 'user', content: '对了，下周三是我的生日。' },
-  { role: 'assistant', content: '那我可要记好了，得好好为你准备点什么。' }
 ]
 const raw = await chat(
   [{ role: 'system', content: buildExtractPrompt() }, ...sample],
@@ -63,8 +63,12 @@ const raw = await chat(
 console.log(raw)
 
 console.log('=== 3. 对账逻辑（纯本地，不发请求） ===')
-const existing = [{ id: 'old', text: '用户没有告知自己的名字', createdAt: 1, updatedAt: 1 }]
-const result = applyOps(existing, { add: ['用户叫阿周'], remove: ['用户没有告知自己的名字'] })
+const existing = [
+  { id: 'a', text: '用户叫小明', category: 'identity', createdAt: 1, updatedAt: 1 },
+  { id: 'b', text: '用户叫小红', category: 'identity', createdAt: 2, updatedAt: 2 }
+]
+const result = applyOps(existing, { add: [], remove: [] })
+console.log('两个名字并存时（应只剩最新的小红）:')
 console.log(JSON.stringify(result, null, 2))
 
 console.log('=== 4. 保护锁测试（受保护条目不可被删除） ===')
@@ -73,3 +77,8 @@ const protectedResult = applyOps(
   { add: ['用户的名字是小周'], remove: ['用户叫郭成卓'] }
 )
 console.log(JSON.stringify(protectedResult, null, 2))
+
+console.log('=== 5. 身份信息同项去重 + 不同项可并存 ===')
+const withAge = applyOps(result, { add: [{ text: '用户今年25岁', category: 'identity' }] })
+console.log('应同时有 小红(名字) 和 25岁(年龄):')
+console.log(JSON.stringify(withAge, null, 2))
