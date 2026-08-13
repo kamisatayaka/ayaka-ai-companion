@@ -116,6 +116,10 @@ STT_MODEL=whisper-1
 - **成本控制 Cost control**：上下文仅保留最近约 20 轮，记忆有上限。Context capped at ~20 recent turns; memory bounded.
 - **安全 Security**：`contextIsolation` 开启、`nodeIntegration` 关闭，前端经 IPC 与主进程通信。Renderer talks to main only through IPC.
 
+## 贡献者 Contributors
+
+[![kamisatayaka](https://github.com/kamisatayaka.png?size=64)](https://github.com/kamisatayaka) — [kamisatayaka](https://github.com/kamisatayaka) · 项目作者 Project Author
+
 ## 路线图 Roadmap
 
 | 里程碑 Milestone | 状态 Status |
