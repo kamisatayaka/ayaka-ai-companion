@@ -3,6 +3,7 @@
   "productName": "神里绫华 AI 陪伴",
   "version": "0.1.0",
   "description": "AI 桌面陪伴应用——神里绫华 · 白鹭公主",
+  "license": "MIT",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {

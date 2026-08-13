@@ -120,6 +120,10 @@ STT_MODEL=whisper-1
 
 [![kamisatayaka](https://github.com/kamisatayaka.png?size=64)](https://github.com/kamisatayaka) — [kamisatayaka](https://github.com/kamisatayaka) · 项目作者 Project Author
 
+## 许可证 License
+
+本项目基于 [MIT License](./LICENSE) 开源。Released under the [MIT License](./LICENSE).
+
 ## 路线图 Roadmap
 
 | 里程碑 Milestone | 状态 Status |
