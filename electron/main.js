@@ -61,6 +61,20 @@ function saveMemoryAndNotify(memory) {
   }
 }
 
+// 启动审查：清理存量里明显不合理/自相矛盾的记忆（有 .bak 备份兜底）
+function auditMemory() {
+  const memory = loadMemory()
+  const before = memory.facts.length
+  memory.facts = memory.facts.filter((f) => {
+    const others = memory.facts.filter((x) => x.id !== f.id)
+    return reviewFact(f, others).length === 0
+  })
+  if (memory.facts.length !== before) {
+    console.log('[memory] 启动审查清理了', before - memory.facts.length, '条不合理记忆')
+    saveMemoryAndNotify(memory)
+  }
+}
+
 function buildMemoryPrompt(memory) {
   if (!memory.facts.length) return ''
   const lines = memory.facts.map((f) => `- ${f.text}`).join('\n')
@@ -625,6 +639,7 @@ if (!gotSingleInstanceLock) {
   app.on('second-instance', () => showMainWindow())
   app.whenReady().then(() => {
     loadEnvFile()
+    auditMemory()
     // 允许渲染进程使用麦克风（语音输入）
     session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
       callback(permission === 'media')
