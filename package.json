@@ -2,7 +2,7 @@
   "name": "ayaka-ai-companion",
   "productName": "神里绫华 AI 陪伴",
   "version": "0.1.0",
-  "description": "AI 桌面陪伴练手项目（MVP：角色聊天）——神里绫华",
+  "description": "AI 桌面陪伴应用——神里绫华 · 白鹭公主",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
