@@ -14,12 +14,12 @@ const res = await fetch('http://localhost:11434/v1/chat/completions', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    model: 'qwen2.5:1.5b',
+    model: 'qwen2.5:7b',
     messages,
     temperature: 0.9,
     max_tokens: 500
   })
 })
 const data = await res.json()
-console.log('===== qwen2.5:1.5b 的回答 =====')
+console.log('===== qwen2.5:7b 的回答 =====')
 console.log(data.choices?.[0]?.message?.content || JSON.stringify(data).slice(0, 500))
