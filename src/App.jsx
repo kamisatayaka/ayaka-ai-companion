@@ -34,7 +34,7 @@ export default function App() {
   // M3 打字机效果：reveal = { index, count }，表示第 index 条消息已显示前 count 个字符
   const [reveal, setReveal] = useState(null)
   // M4 语音：自动朗读开关与当前播放的音频
-  const [autoSpeak, setAutoSpeak] = useState(false)
+  const [autoSpeak, setAutoSpeak] = useState(true)
   const [ttsNotice, setTtsNotice] = useState('')
   const audioRef = useRef(null)
   const listRef = useRef(null)
@@ -50,28 +50,41 @@ export default function App() {
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-  // M4：Edge TTS 朗读（主进程合成 MP3，前端播放）；失败时兜底用系统语音
-  async function speak(text) {
+  // M4：合成语音（主进程 Edge/克隆 TTS），返回可播放的 Audio；失败返回 null
+  async function prepareSpeechAudio(text) {
     const clean = stripStageDirections(text)
-    if (!clean) return
-    stopSpeak()
+    if (!clean) return null
     try {
       const res = await window.api.speak(clean)
       if (res?.audioBase64) {
         const mime = res.mime || 'audio/mpeg'
-        const audio = new Audio(`data:${mime};base64,${res.audioBase64}`)
-        audioRef.current = audio
-        await audio.play()
-      } else {
-        console.error('[tts]', res?.error || '未知错误')
-        showTtsNotice('音色服务未连接，正在使用备用语音')
-        speakFallback(clean)
+        return new Audio(`data:${mime};base64,${res.audioBase64}`)
       }
+      console.error('[tts]', res?.error || '未知错误')
+      showTtsNotice('音色服务未连接，正在使用备用语音')
+      return null
     } catch (err) {
       console.error('[tts]', err)
       showTtsNotice('音色服务未连接，正在使用备用语音')
-      speakFallback(clean)
+      return null
     }
+  }
+
+  function playSpeechAudio(audio) {
+    if (!audio) return
+    stopSpeak()
+    audioRef.current = audio
+    audio.play().catch(() => {})
+  }
+
+  // 手动「朗读」按钮
+  async function speak(text) {
+    const clean = stripStageDirections(text)
+    if (!clean) return
+    stopSpeak()
+    const audio = await prepareSpeechAudio(text)
+    if (audio) playSpeechAudio(audio)
+    else speakFallback(clean)
   }
 
   function showTtsNotice(msg) {
@@ -159,10 +172,18 @@ export default function App() {
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
       if (reply.content && reply.mode !== 'error') {
+        // 并行合成：打字机显示期间后台生成语音，显示完立刻播（几乎无等待感）
+        const pendingAudio = autoSpeak ? prepareSpeechAudio(reply.content) : null
         startReveal(final.length - 1, reply.content, () => {
           setTyping(false)
           nextProactiveRef.current = Date.now() + IDLE_AFTER_PROACTIVE_MS
-          if (autoSpeak) speak(reply.content)
+          if (pendingAudio) {
+            pendingAudio.then((audio) => {
+              if (gen !== generationRef.current) return
+              if (audio) playSpeechAudio(audio)
+              else speakFallback(stripStageDirections(reply.content))
+            })
+          }
         })
       } else {
         setTyping(false)
@@ -220,10 +241,17 @@ export default function App() {
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
       if (reply.content && reply.mode !== 'error') {
-        // 打字机效果：回复逐字显示，播完才解锁输入
+        // 并行合成：打字机显示期间后台生成语音，显示完立刻播
+        const pendingAudio = autoSpeak ? prepareSpeechAudio(reply.content) : null
         startReveal(final.length - 1, reply.content, () => {
           setTyping(false)
-          if (autoSpeak) speak(reply.content)
+          if (pendingAudio) {
+            pendingAudio.then((audio) => {
+              if (gen !== generationRef.current) return
+              if (audio) playSpeechAudio(audio)
+              else speakFallback(stripStageDirections(reply.content))
+            })
+          }
         })
       } else {
         setTyping(false)
