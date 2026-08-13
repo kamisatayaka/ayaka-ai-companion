@@ -14,6 +14,10 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.VITE_DEV_SERVER_URL
+// 数据全部放在项目目录内，不占系统盘
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getAppPath(), 'userdata'))
+}
 const historyFile = () => path.join(app.getPath('userData'), 'history.json')
 const memoryFile = () => path.join(app.getPath('userData'), 'memory.json')
 
