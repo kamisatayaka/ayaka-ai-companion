@@ -155,6 +155,76 @@ body {
   vertical-align: 1px;
 }
 
+.memory-actions {
+  float: right;
+  margin-left: 10px;
+}
+
+.memory-op {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-dim);
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 1px 7px;
+  margin-left: 5px;
+  cursor: pointer;
+}
+
+.memory-op:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.memory-op.solid {
+  border-color: rgba(201, 167, 255, 0.5);
+  color: var(--accent);
+}
+
+.memory-op.danger {
+  border-color: rgba(224, 138, 138, 0.4);
+  color: #e08a8a;
+}
+
+.memory-op.danger-solid {
+  border-color: #b55a5a;
+  background: rgba(181, 90, 90, 0.25);
+  color: #fff;
+}
+
+.memory-edit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.memory-edit-input {
+  flex: 1;
+  min-width: 180px;
+  background: var(--bg-soft);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 5px 9px;
+  font-size: 13px;
+  outline: none;
+}
+
+.memory-edit-input:focus {
+  border-color: var(--accent-deep);
+}
+
+.memory-edit-select {
+  background: var(--bg-soft);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 6px;
+  outline: none;
+}
+
 .memory-empty {
   color: var(--text-dim);
 }

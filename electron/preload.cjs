@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   saveHistory: (messages) => ipcRenderer.invoke('history:save', messages),
   getStatus: () => ipcRenderer.invoke('app:status'),
   getMemories: () => ipcRenderer.invoke('memory:list'),
+  deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
+  updateMemory: (id, patch) => ipcRenderer.invoke('memory:update', id, patch),
   onMemoryUpdated: (callback) => {
     const listener = (_event, facts) => callback(facts)
     ipcRenderer.on('memory:updated', listener)

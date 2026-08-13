@@ -30,6 +30,10 @@ export default function App() {
   const [status, setStatus] = useState({ mode: 'mock', model: '' })
   const [memories, setMemories] = useState([])
   const [showMemories, setShowMemories] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
+  const [editCategory, setEditCategory] = useState('other')
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [confirming, setConfirming] = useState(false)
   // M3 打字机效果：reveal = { index, count }，表示第 index 条消息已显示前 count 个字符
   const [reveal, setReveal] = useState(null)
@@ -253,6 +257,30 @@ export default function App() {
     nextProactiveRef.current = Date.now() + IDLE_AFTER_CHAT_MS
   }
 
+  // 记忆管理：开始编辑 / 保存 / 删除
+  function startEditMemory(m) {
+    setEditingId(m.id)
+    setEditText(m.text)
+    setEditCategory(m.category || 'other')
+  }
+
+  async function saveEditMemory(id) {
+    const text = editText.trim()
+    if (!text) return
+    await window.api.updateMemory(id, { text, category: editCategory })
+    setMemories((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, text, category: editCategory } : f))
+    )
+    setEditingId(null)
+    setConfirmDeleteId(null)
+  }
+
+  async function handleDeleteMemory(m) {
+    await window.api.deleteMemory(m.id)
+    setMemories((prev) => prev.filter((f) => f.id !== m.id))
+    setConfirmDeleteId(null)
+  }
+
   async function handleSend(text) {
     if (!text.trim() || typing) return
     stopSpeak()
@@ -361,8 +389,43 @@ export default function App() {
           ) : (
             memories.map((m) => (
               <div className="memory-item" key={m.id}>
-                <span className="memory-tag">{CATEGORY_LABELS[m.category] || '其他'}</span>
-                {m.text}
+                {editingId === m.id ? (
+                  <div className="memory-edit">
+                    <input
+                      className="memory-edit-input"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) saveEditMemory(m.id)
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                    />
+                    <select
+                      className="memory-edit-select"
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                    >
+                      {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
+                    <button className="memory-op solid" onClick={() => saveEditMemory(m.id)}>保存</button>
+                    <button className="memory-op" onClick={() => setEditingId(null)}>取消</button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="memory-tag">{CATEGORY_LABELS[m.category] || '其他'}</span>
+                    {m.text}
+                    <span className="memory-actions">
+                      <button className="memory-op" onClick={() => startEditMemory(m)}>改</button>
+                      {confirmDeleteId === m.id ? (
+                        <button className="memory-op danger-solid" onClick={() => handleDeleteMemory(m)}>确认删</button>
+                      ) : (
+                        <button className="memory-op danger" onClick={() => setConfirmDeleteId(m.id)}>删</button>
+                      )}
+                    </span>
+                  </>
+                )}
               </div>
             ))
           )}

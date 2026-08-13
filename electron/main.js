@@ -54,6 +54,13 @@ function saveMemory(memory) {
   fs.writeFileSync(memoryFile(), JSON.stringify(memory, null, 2), 'utf-8')
 }
 
+function saveMemoryAndNotify(memory) {
+  saveMemory(memory)
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('memory:updated', memory.facts)
+  }
+}
+
 function buildMemoryPrompt(memory) {
   if (!memory.facts.length) return ''
   const lines = memory.facts.map((f) => `- ${f.text}`).join('\n')
@@ -208,11 +215,8 @@ async function rememberAsync(messages, userCount) {
     const ops = await extractFacts(newMessages, memory.facts)
     memory.facts = applyOps(memory.facts, ops)
     memory.processedUserCount = Math.max(memory.processedUserCount, userCount)
-    saveMemory(memory)
+    saveMemoryAndNotify(memory)
     console.log('[memory] 整理完成 add/remove:', JSON.stringify(ops))
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('memory:updated', memory.facts)
-    }
   } catch (err) {
     // 整理失败不影响聊天
     console.error('[memory] 记忆整理失败（已跳过，不影响聊天）:', err?.message || err)
@@ -419,6 +423,26 @@ ipcMain.handle('app:status', async () => ({
 }))
 
 ipcMain.handle('memory:list', async () => loadMemory().facts)
+
+// 记忆管理：删除单条
+ipcMain.handle('memory:delete', async (_event, id) => {
+  const memory = loadMemory()
+  memory.facts = memory.facts.filter((f) => f.id !== id)
+  saveMemoryAndNotify(memory)
+  return true
+})
+
+// 记忆管理：修改单条（文本/分类）
+ipcMain.handle('memory:update', async (_event, id, patch = {}) => {
+  const memory = loadMemory()
+  const fact = memory.facts.find((f) => f.id === id)
+  if (!fact) return false
+  if (typeof patch.text === 'string' && patch.text.trim()) fact.text = patch.text.trim()
+  if (patch.category) fact.category = patch.category
+  fact.updatedAt = Date.now()
+  saveMemoryAndNotify(memory)
+  return true
+})
 
 // ---------- 窗口（M6 桌面感） ----------
 let mainWindow = null
