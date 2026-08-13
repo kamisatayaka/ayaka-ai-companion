@@ -65,7 +65,8 @@ function buildMemoryPrompt(memory) {
   if (!memory.facts.length) return ''
   const lines = memory.facts.map((f) => `- ${f.text}`).join('\n')
   return (
-    '关于旅行者，你记得这些事（在合适的时候自然用上，不要生硬罗列，也不要句句都提）：\n' + lines
+    '关于旅行者，你记得这些事（在合适的时候自然用上；当旅行者问你是否记得某件事时，直接根据记忆自信作答，不要否认、不要说「不记得」；只有记忆里确实没有时才如实说明）：\n' +
+    lines
   )
 }
 
