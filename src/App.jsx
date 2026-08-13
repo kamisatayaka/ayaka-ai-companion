@@ -3,6 +3,7 @@ import ChatMessage from './components/ChatMessage.jsx'
 import MessageInput from './components/MessageInput.jsx'
 import { character } from './shared/character.js'
 import { stripStageDirections } from './shared/ttsFilter.js'
+import avatar from './assets/avatar.png'
 
 // M3 活人感：空闲多久绫华会主动发消息
 const IDLE_BEFORE_FIRST_MS = 45_000
@@ -362,7 +363,7 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <div className="avatar small">{character.name[0]}</div>
+          <img className="avatar-img small" src={avatar} alt={character.name} />
           <div>
             <div className="title">{character.name} · 白鹭公主</div>
             <div className="status">
@@ -455,7 +456,7 @@ export default function App() {
         })}
         {typing && !reveal && (
           <div className="message-row assistant">
-            <div className="avatar">{character.name[0]}</div>
+            <img className="avatar-img" src={avatar} alt={character.name} />
             <div className="bubble-wrap">
               <div className="name">{character.name}</div>
               <div className="bubble typing">
@@ -481,7 +482,7 @@ export default function App() {
             aria-labelledby="clear-dialog-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="confirm-avatar">{character.name[0]}</div>
+            <img className="confirm-avatar" src={avatar} alt={character.name} />
             <div className="confirm-title" id="clear-dialog-title">清空对话</div>
             <div className="confirm-text">
               确定要清空和{character.name}的全部聊天记录吗？此操作不可恢复。

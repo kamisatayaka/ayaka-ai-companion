@@ -1,4 +1,5 @@
 import { character } from '../shared/character.js'
+import avatar from '../assets/avatar.png'
 
 function formatTime(ts) {
   if (!ts) return ''
@@ -11,7 +12,7 @@ export default function ChatMessage({ message, animating, onSpeak }) {
   const isUser = message.role === 'user'
   return (
     <div className={`message-row ${isUser ? 'user' : 'assistant'}`}>
-      {!isUser && <div className="avatar">{character.name[0]}</div>}
+      {!isUser && <img className="avatar-img" src={avatar} alt={character.name} />}
       <div className="bubble-wrap">
         {!isUser && <div className="name">{character.name}</div>}
         <div className={`bubble ${message.mode ? `mode-${message.mode}` : ''}`}>

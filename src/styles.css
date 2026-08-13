@@ -272,6 +272,7 @@ body {
   color: #fff;
   background: linear-gradient(135deg, #8f6fd8, #5b4a9c);
   box-shadow: 0 4px 16px rgba(143, 111, 216, 0.4);
+  object-fit: cover;
 }
 
 .confirm-title {
@@ -423,6 +424,20 @@ body {
   color: #fff;
   background: linear-gradient(135deg, #8f6fd8, #5b4a9c);
   box-shadow: 0 2px 10px rgba(143, 111, 216, 0.35);
+}
+
+.avatar-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 10px rgba(143, 111, 216, 0.35);
+}
+
+.avatar-img.small {
+  width: 32px;
+  height: 32px;
 }
 
 .bubble-wrap {
