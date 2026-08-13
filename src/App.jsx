@@ -37,6 +37,9 @@ export default function App() {
   const [autoSpeak, setAutoSpeak] = useState(true)
   const [ttsNotice, setTtsNotice] = useState('')
   const audioRef = useRef(null)
+  // 语音与打字机同步：音频就绪后把剩余文字的显示速度调到与语音一致
+  const revealDelayRef = useRef(null)
+  const revealCountRef = useRef(0)
   const listRef = useRef(null)
   // 代际标记：清空对话时 +1，用于作废等待中的旧回复，防止「复活」旧对话
   const generationRef = useRef(0)
@@ -75,6 +78,20 @@ export default function App() {
     stopSpeak()
     audioRef.current = audio
     audio.play().catch(() => {})
+  }
+
+  // 让「文字显示完」和「语音说完」同时发生
+  function syncRevealWithAudio(audio, text) {
+    if (!audio) return
+    const apply = () => {
+      const remaining = text.length - revealCountRef.current
+      if (remaining <= 0) return
+      const ms = (audio.duration || 2) * 1000
+      // 每字延迟夹在 12~120ms，避免太快或像卡住
+      revealDelayRef.current = Math.min(120, Math.max(12, ms / remaining))
+    }
+    if (Number.isFinite(audio.duration) && audio.duration > 0) apply()
+    else audio.addEventListener('loadedmetadata', apply, { once: true })
   }
 
   // 手动「朗读」按钮
@@ -180,7 +197,10 @@ export default function App() {
           if (pendingAudio) {
             pendingAudio.then((audio) => {
               if (gen !== generationRef.current) return
-              if (audio) playSpeechAudio(audio)
+              if (audio) {
+                syncRevealWithAudio(audio, reply.content)
+                playSpeechAudio(audio)
+              }
               else speakFallback(stripStageDirections(reply.content))
             })
           }
@@ -199,17 +219,22 @@ export default function App() {
   // 打字机效果：把整段文本逐字显示出来，播完调用 onDone
   function startReveal(index, text, onDone) {
     const gen = generationRef.current
+    revealDelayRef.current = null
+    revealCountRef.current = 0
     let count = 0
     const step = () => {
       if (gen !== generationRef.current) return // 对话被清空，中断动画
       count += 1
+      revealCountRef.current = count
       if (count >= text.length) {
         setReveal(null)
+        revealDelayRef.current = null
         onDone?.()
         return
       }
       setReveal({ index, count })
-      setTimeout(step, 28 + Math.random() * 18)
+      const delay = revealDelayRef.current ?? (28 + Math.random() * 18)
+      setTimeout(step, delay)
     }
     setReveal({ index, count: 0 })
     setTimeout(step, 150)
@@ -248,7 +273,10 @@ export default function App() {
           if (pendingAudio) {
             pendingAudio.then((audio) => {
               if (gen !== generationRef.current) return
-              if (audio) playSpeechAudio(audio)
+              if (audio) {
+                syncRevealWithAudio(audio, reply.content)
+                playSpeechAudio(audio)
+              }
               else speakFallback(stripStageDirections(reply.content))
             })
           }
