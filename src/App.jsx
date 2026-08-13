@@ -189,22 +189,26 @@ export default function App() {
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
       if (reply.content && reply.mode !== 'error') {
-        // 并行合成：打字机显示期间后台生成语音，显示完立刻播（几乎无等待感）
-        const pendingAudio = autoSpeak ? prepareSpeechAudio(reply.content) : null
-        startReveal(final.length - 1, reply.content, () => {
+        const revealDone = () => {
           setTyping(false)
           nextProactiveRef.current = Date.now() + IDLE_AFTER_PROACTIVE_MS
-          if (pendingAudio) {
-            pendingAudio.then((audio) => {
-              if (gen !== generationRef.current) return
-              if (audio) {
-                syncRevealWithAudio(audio, reply.content)
-                playSpeechAudio(audio)
-              }
-              else speakFallback(stripStageDirections(reply.content))
-            })
-          }
-        })
+        }
+        if (autoSpeak) {
+          // 同步呈现：先等语音就绪（期间显示打字点点），再让文字和语音同时开始
+          prepareSpeechAudio(reply.content).then((audio) => {
+            if (gen !== generationRef.current) return
+            if (audio) {
+              startReveal(final.length - 1, reply.content, revealDone)
+              syncRevealWithAudio(audio, reply.content)
+              playSpeechAudio(audio)
+            } else {
+              startReveal(final.length - 1, reply.content, revealDone)
+              speakFallback(stripStageDirections(reply.content))
+            }
+          })
+        } else {
+          startReveal(final.length - 1, reply.content, revealDone)
+        }
       } else {
         setTyping(false)
         nextProactiveRef.current = Date.now() + IDLE_AFTER_PROACTIVE_MS
@@ -266,21 +270,22 @@ export default function App() {
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
       if (reply.content && reply.mode !== 'error') {
-        // 并行合成：打字机显示期间后台生成语音，显示完立刻播
-        const pendingAudio = autoSpeak ? prepareSpeechAudio(reply.content) : null
-        startReveal(final.length - 1, reply.content, () => {
-          setTyping(false)
-          if (pendingAudio) {
-            pendingAudio.then((audio) => {
-              if (gen !== generationRef.current) return
-              if (audio) {
-                syncRevealWithAudio(audio, reply.content)
-                playSpeechAudio(audio)
-              }
-              else speakFallback(stripStageDirections(reply.content))
-            })
-          }
-        })
+        if (autoSpeak) {
+          // 同步呈现：先等语音就绪，再让文字和语音同时开始
+          prepareSpeechAudio(reply.content).then((audio) => {
+            if (gen !== generationRef.current) return
+            if (audio) {
+              startReveal(final.length - 1, reply.content, () => setTyping(false))
+              syncRevealWithAudio(audio, reply.content)
+              playSpeechAudio(audio)
+            } else {
+              startReveal(final.length - 1, reply.content, () => setTyping(false))
+              speakFallback(stripStageDirections(reply.content))
+            }
+          })
+        } else {
+          startReveal(final.length - 1, reply.content, () => setTyping(false))
+        }
       } else {
         setTyping(false)
       }
