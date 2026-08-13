@@ -2,6 +2,13 @@
 
 一个以「AI 虚拟陪伴」为核心的桌面应用：她会记住你、理解你，用你自己的声音陪你聊天，安静地住在系统托盘的角落里。An AI-powered desktop companion built around a living, memorable character — she remembers what matters to you, understands the way you talk, and speaks with a voice of your own making.
 
+[![CI](https://github.com/kamisatayaka/ayaka-ai-companion/actions/workflows/ci.yml/badge.svg)](https://github.com/kamisatayaka/ayaka-ai-companion/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## 预览 Preview
+
+![Kamisato Ayaka · AI Desktop Companion](assets/screenshot.png)
+
 ## 功能特性 Features
 
 - **角色化对话 Character-driven conversations** — 人设驱动的 AI 聊天，兼容任意 OpenAI 风格大模型（DeepSeek / Kimi / 通义 / Ollama 等）。Persona-prompted dialogue with any OpenAI-compatible LLM.
