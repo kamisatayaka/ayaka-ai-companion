@@ -6,7 +6,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { buildSystemPrompt, buildFewShotMessages } from '../src/shared/character.js'
+import { character, buildSystemPrompt, buildFewShotMessages } from '../src/shared/character.js'
 import { buildExtractPrompt } from '../src/shared/memoryPrompt.js'
 import { applyOps, guessCategory, reviewFact } from '../src/shared/memory.js'
 import { stripStageDirections } from '../src/shared/ttsFilter.js'
@@ -266,6 +266,19 @@ ipcMain.handle('chat:send', async (_event, { messages = [] } = {}) => {
       apiMessages.splice(lastUserIdx, 0, { role: 'system', content: memoryPrompt })
     } else {
       apiMessages.push({ role: 'system', content: memoryPrompt })
+    }
+  }
+
+  // 常识提示：用户说了明显不合理的话时，让绫华温柔纠正而不是无视
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+  if (lastUser && lastUser.content) {
+    const problems = reviewFact({ text: String(lastUser.content) }, memory.facts)
+    if (problems.length) {
+      const hint =
+        `【提示】旅行者刚才的表述明显不合常理（${problems.join('；')}）。` +
+        `请以${character.name}的口吻温柔地指出并和他确认，不要默默接受或忽略。`
+      const lastUserIdx = apiMessages.map((m) => m.role).lastIndexOf('user')
+      if (lastUserIdx >= 0) apiMessages.splice(lastUserIdx, 0, { role: 'system', content: hint })
     }
   }
 
