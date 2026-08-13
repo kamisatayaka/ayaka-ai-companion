@@ -23,7 +23,9 @@ const character = await import(pathToFileURL(path.join(root, 'src/shared/charact
 const { buildExtractPrompt } = await import(
   pathToFileURL(path.join(root, 'src/shared/memoryPrompt.js'))
 )
-const { applyOps } = await import(pathToFileURL(path.join(root, 'src/shared/memory.js')))
+const { applyOps, reviewFact } = await import(
+  pathToFileURL(path.join(root, 'src/shared/memory.js'))
+)
 
 const base = (env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/+$/, '')
 const model = env.OPENAI_MODEL || 'deepseek-chat'
@@ -67,7 +69,7 @@ const existing = [
   { id: 'a', text: '用户叫小明', category: 'identity', createdAt: 1, updatedAt: 1 },
   { id: 'b', text: '用户叫小红', category: 'identity', createdAt: 2, updatedAt: 2 }
 ]
-const result = applyOps(existing, { add: [], remove: [] })
+const result = applyOps(existing, { add: [], remove: [] }).facts
 console.log('两个名字并存时（应只剩最新的小红）:')
 console.log(JSON.stringify(result, null, 2))
 
@@ -75,10 +77,21 @@ console.log('=== 4. 保护锁测试（受保护条目不可被删除） ===')
 const protectedResult = applyOps(
   [{ id: 'p', text: '用户叫郭成卓', protected: true }],
   { add: ['用户的名字是小周'], remove: ['用户叫郭成卓'] }
-)
+).facts
 console.log(JSON.stringify(protectedResult, null, 2))
 
 console.log('=== 5. 身份信息同项去重 + 不同项可并存 ===')
-const withAge = applyOps(result, { add: [{ text: '用户今年25岁', category: 'identity' }] })
+const withAge = applyOps(result, { add: [{ text: '用户今年25岁', category: 'identity' }] }).facts
 console.log('应同时有 小红(名字) 和 25岁(年龄):')
 console.log(JSON.stringify(withAge, null, 2))
+
+console.log('=== 6. 审查机制测试 ===')
+const bad = reviewFact({ text: '用户今年二十四岁，刚工作一百年' }, [])
+console.log('24岁+工作100年 应被拒:', JSON.stringify(bad))
+const good = reviewFact({ text: '用户刚工作一年' }, [{ text: '用户今年二十四岁' }])
+console.log('24岁+工作1年 应通过:', JSON.stringify(good))
+const rejected = applyOps(
+  [{ id: 'a', text: '用户今年二十四岁', category: 'identity', createdAt: 1, updatedAt: 1 }],
+  { add: [{ text: '用户工作了五十年', category: 'identity' }] }
+)
+console.log('入库拒绝列表:', JSON.stringify(rejected.rejected))

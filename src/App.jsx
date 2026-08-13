@@ -34,6 +34,7 @@ export default function App() {
   const [editText, setEditText] = useState('')
   const [editCategory, setEditCategory] = useState('other')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [memoryNotice, setMemoryNotice] = useState('')
   const [confirming, setConfirming] = useState(false)
   // M3 打字机效果：reveal = { index, count }，表示第 index 条消息已显示前 count 个字符
   const [reveal, setReveal] = useState(null)
@@ -267,7 +268,12 @@ export default function App() {
   async function saveEditMemory(id) {
     const text = editText.trim()
     if (!text) return
-    await window.api.updateMemory(id, { text, category: editCategory })
+    const res = await window.api.updateMemory(id, { text, category: editCategory })
+    if (res && res.error) {
+      setMemoryNotice(`审查未通过：${res.error}`)
+      setTimeout(() => setMemoryNotice(''), 5000)
+      return
+    }
     setMemories((prev) =>
       prev.map((f) => (f.id === id ? { ...f, text, category: editCategory } : f))
     )
@@ -384,6 +390,7 @@ export default function App() {
       {showMemories && (
         <div className="memory-panel">
           <div className="memory-title">{character.name}记得这些事</div>
+          {memoryNotice && <div className="memory-notice">{memoryNotice}</div>}
           {memories.length === 0 ? (
             <div className="memory-empty">还没有记忆。多聊几句，她会慢慢记住关于你的事。</div>
           ) : (

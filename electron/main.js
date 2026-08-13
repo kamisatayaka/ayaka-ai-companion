@@ -8,7 +8,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { buildSystemPrompt, buildFewShotMessages } from '../src/shared/character.js'
 import { buildExtractPrompt } from '../src/shared/memoryPrompt.js'
-import { applyOps, guessCategory } from '../src/shared/memory.js'
+import { applyOps, guessCategory, reviewFact } from '../src/shared/memory.js'
 import { stripStageDirections } from '../src/shared/ttsFilter.js'
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
@@ -214,10 +214,14 @@ async function rememberAsync(messages, userCount) {
     const newMessages = unprocessedMessages(messages, memory.processedUserCount)
     if (!newMessages.length) return
     const ops = await extractFacts(newMessages, memory.facts)
-    memory.facts = applyOps(memory.facts, ops)
+    const result = applyOps(memory.facts, ops)
+    memory.facts = result.facts
     memory.processedUserCount = Math.max(memory.processedUserCount, userCount)
     saveMemoryAndNotify(memory)
     console.log('[memory] 整理完成 add/remove:', JSON.stringify(ops))
+    if (result.rejected.length) {
+      console.log('[memory] 审查拒绝:', JSON.stringify(result.rejected))
+    }
   } catch (err) {
     // 整理失败不影响聊天
     console.error('[memory] 记忆整理失败（已跳过，不影响聊天）:', err?.message || err)
@@ -445,8 +449,16 @@ ipcMain.handle('memory:delete', async (_event, id) => {
 ipcMain.handle('memory:update', async (_event, id, patch = {}) => {
   const memory = loadMemory()
   const fact = memory.facts.find((f) => f.id === id)
-  if (!fact) return false
-  if (typeof patch.text === 'string' && patch.text.trim()) fact.text = patch.text.trim()
+  if (!fact) return { error: '找不到这条记忆' }
+  const nextText = typeof patch.text === 'string' && patch.text.trim() ? patch.text.trim() : fact.text
+  const nextCategory = patch.category || fact.category
+  // 审查机制：手动编辑同样拦截不合理内容
+  const problems = reviewFact(
+    { text: nextText, category: nextCategory },
+    memory.facts.filter((f) => f.id !== id)
+  )
+  if (problems.length) return { error: problems.join('；') }
+  fact.text = nextText
   if (patch.category) fact.category = patch.category
   fact.updatedAt = Date.now()
   saveMemoryAndNotify(memory)
