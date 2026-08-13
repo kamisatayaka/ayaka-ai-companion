@@ -232,16 +232,24 @@ ipcMain.handle('chat:send', async (_event, { messages = [] } = {}) => {
   const recent = messages.slice(-40)
   const memory = loadMemory()
 
-  // 组装：人设卡 + 记忆 + few-shot 示例 + 最近历史
-  const systemParts = [buildSystemPrompt()]
-  const memoryPrompt = buildMemoryPrompt(memory)
-  if (memoryPrompt) systemParts.push(memoryPrompt)
+  // 组装：人设卡 + few-shot 示例 + 最近历史
   const apiMessages = [
-    { role: 'system', content: systemParts.join('\n\n') },
+    { role: 'system', content: buildSystemPrompt() },
     // few-shot：先给模型看几条绫华的对话范本，再进入真实对话
     ...buildFewShotMessages(),
     ...recent
   ]
+
+  // 记忆提示贴近用户最新消息：对抗对话历史中此前的推脱，让模型直接采用记忆作答
+  const memoryPrompt = buildMemoryPrompt(memory)
+  if (memoryPrompt) {
+    const lastUserIdx = apiMessages.map((m) => m.role).lastIndexOf('user')
+    if (lastUserIdx >= 0) {
+      apiMessages.splice(lastUserIdx, 0, { role: 'system', content: memoryPrompt })
+    } else {
+      apiMessages.push({ role: 'system', content: memoryPrompt })
+    }
+  }
 
   if (!hasApiKey()) return mockReply(recent)
 
