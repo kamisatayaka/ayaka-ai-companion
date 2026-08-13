@@ -33,6 +33,8 @@ export default function App() {
   const [confirming, setConfirming] = useState(false)
   // M3 打字机效果：reveal = { index, count }，表示第 index 条消息已显示前 count 个字符
   const [reveal, setReveal] = useState(null)
+  // 等待语音期间先隐藏文字，避免「先出全文→清空→重打」
+  const [pendingReveal, setPendingReveal] = useState(null)
   // M4 语音：自动朗读开关与当前播放的音频
   const [autoSpeak, setAutoSpeak] = useState(true)
   const [ttsNotice, setTtsNotice] = useState('')
@@ -185,6 +187,7 @@ export default function App() {
       const reply = await window.api.sendProactive()
       if (gen !== generationRef.current) return
       const final = [...messagesRef.current, { ...reply, ts: Date.now() }]
+      if (reply.content && reply.mode !== 'error') setPendingReveal(final.length - 1)
       setMessages(final)
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
@@ -223,6 +226,7 @@ export default function App() {
   // 打字机效果：把整段文本逐字显示出来，播完调用 onDone
   function startReveal(index, text, onDone) {
     const gen = generationRef.current
+    setPendingReveal(null)
     revealDelayRef.current = null
     revealCountRef.current = 0
     let count = 0
@@ -266,6 +270,7 @@ export default function App() {
       // 等待期间对话被清空或重新开始：丢弃这条迟到的回复
       if (gen !== generationRef.current) return
       const final = [...withUser, { ...reply, ts: Date.now() }]
+      if (reply.content && reply.mode !== 'error') setPendingReveal(final.length - 1)
       setMessages(final)
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
@@ -304,6 +309,7 @@ export default function App() {
   async function handleClearConfirmed() {
     setConfirming(false)
     stopSpeak()
+    setPendingReveal(null)
     try {
       await window.api.saveHistory([])
       // 作废等待中的回复，并解除可能卡住的输入锁定
@@ -365,6 +371,7 @@ export default function App() {
 
       <main className="chat" ref={listRef}>
         {messages.map((msg, i) => {
+          if (pendingReveal === i) return null // 语音就绪前不显示，用打字点点代替
           const animating = reveal !== null && reveal.index === i
           const content = animating ? msg.content.slice(0, reveal.count) : msg.content
           return (
