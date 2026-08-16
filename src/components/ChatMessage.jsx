@@ -17,6 +17,13 @@ export default function ChatMessage({ message, animating, onSpeak }) {
         {!isUser && <div className="name">{character.name}</div>}
         <div className={`bubble ${message.mode ? `mode-${message.mode}` : ''}`}>
           {message.content}
+          {message.image && (
+            <img
+              className="chat-image"
+              src={`data:${message.mime || 'image/png'};base64,${message.image}`}
+              alt={message.content || ''}
+            />
+          )}
           {animating && <span className="caret" />}
         </div>
         <div className="meta">

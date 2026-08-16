@@ -1,11 +1,20 @@
 import { useRef, useState } from 'react'
 import { character } from '../shared/character.js'
+import { PROMPT_CATEGORIES } from '../shared/imagePrompt.js'
 
-export default function MessageInput({ disabled, onSend, onActivity }) {
+export default function MessageInput({ disabled, onSend, onGenerateImage, onActivity }) {
   const [text, setText] = useState('')
   const [recording, setRecording] = useState(false)
   const [notice, setNotice] = useState('')
+  const [selTags, setSelTags] = useState([])
+  const [showTags, setShowTags] = useState(false)
   const recorderRef = useRef(null)
+
+  function toggleTag(key) {
+    setSelTags((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    )
+  }
 
   function submit() {
     if (!text.trim() || disabled) return
@@ -65,6 +74,26 @@ export default function MessageInput({ disabled, onSend, onActivity }) {
   return (
     <div className="input-wrap">
       {notice && <div className="mic-notice">{notice}</div>}
+      {showTags && (
+        <div className="tag-panel">
+          {PROMPT_CATEGORIES.map((cat) => (
+            <div className="tag-cat" key={cat.label}>
+              <div className="tag-cat-label">{cat.label}</div>
+              <div className="tag-chips">
+                {cat.items.map((it) => (
+                  <button
+                    key={it.key}
+                    className={`tag-chip ${selTags.includes(it.key) ? 'active' : ''}`}
+                    onClick={() => toggleTag(it.key)}
+                  >
+                    {it.key}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="input-bar">
         <button
           className={`mic-btn ${recording ? 'recording' : ''}`}
@@ -89,6 +118,25 @@ export default function MessageInput({ disabled, onSend, onActivity }) {
             }
           }}
         />
+        <button
+          className="img-btn"
+          title="把想看的画面写进输入框，再点这个出图（本地 SD 出图）"
+          onClick={() => {
+            if (disabled) return
+            onGenerateImage?.(text, selTags)
+            setText('')
+          }}
+          disabled={disabled}
+        >
+          🖼️ 发图
+        </button>
+        <button
+          className={`tag-btn ${selTags.length ? 'has-tags' : ''}`}
+          title="选择画面提示词（可多选）"
+          onClick={() => setShowTags((v) => !v)}
+        >
+          提示词{selTags.length ? ` (${selTags.length})` : ''}
+        </button>
         <button className="send-btn" onClick={submit} disabled={disabled || !text.trim()}>
           发送
         </button>

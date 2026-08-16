@@ -29,6 +29,7 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [typing, setTyping] = useState(false)
   const [status, setStatus] = useState({ mode: 'mock', model: '' })
+  const [personaState, setPersonaState] = useState({ current: 'normal', personas: [] })
   const [memories, setMemories] = useState([])
   const [showMemories, setShowMemories] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -39,6 +40,10 @@ export default function App() {
   const [confirming, setConfirming] = useState(false)
   // M3 打字机效果：reveal = { index, count }，表示第 index 条消息已显示前 count 个字符
   const [reveal, setReveal] = useState(null)
+  // M3 真·流式：正在逐字生成的消息下标（该消息内容由 chat:delta 增量填充）
+  const [streamingIndex, setStreamingIndex] = useState(null)
+  // 音画同步：流式消息当前已「显示」的字数（开启朗读时按语音节奏推进）
+  const [displayLen, setDisplayLen] = useState(0)
   // 等待语音期间先隐藏文字，避免「先出全文→清空→重打」
   const [pendingReveal, setPendingReveal] = useState(null)
   // M4 语音：自动朗读开关与当前播放的音频
@@ -54,12 +59,108 @@ export default function App() {
   // M3：主动消息调度与最新消息引用
   const nextProactiveRef = useRef(Date.now() + IDLE_BEFORE_FIRST_MS)
   const messagesRef = useRef(messages)
+  // 逐句音画同步：已收到但未入队的残句、待处理的句子队列、处理中标记
+  const streamBufferRef = useRef('')
+  const pendingSentencesRef = useRef([])
+  const processingRef = useRef(false)
+  const queueDoneResolveRef = useRef(null)
 
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+  // 按句切分：返回 [完整句子数组, 剩余未完整部分]
+  function takeCompleteSentences(buffer) {
+    const out = []
+    let last = 0
+    const re = /[。！？…!?；;]/g
+    let m
+    while ((m = re.exec(buffer))) {
+      out.push(buffer.slice(last, m.index + 1))
+      last = m.index + 1
+    }
+    return [out, buffer.slice(last)]
+  }
+
+  function enqueueSentences(text) {
+    streamBufferRef.current += text
+    const [sentences, rest] = takeCompleteSentences(streamBufferRef.current)
+    streamBufferRef.current = rest
+    if (sentences.length) pendingSentencesRef.current.push(...sentences)
+  }
+
+  function waitQueueEmpty() {
+    return new Promise((resolve) => {
+      if (!processingRef.current && pendingSentencesRef.current.length === 0) {
+        resolve()
+      } else {
+        queueDoneResolveRef.current = resolve
+      }
+    })
+  }
+
+  // 逐句处理：先合成语音，再让文字按语音时长匀速显示并同时播放
+  async function processSentenceQueue(gen) {
+    if (processingRef.current) return
+    processingRef.current = true
+    const startedAt = Date.now()
+    try {
+      while (pendingSentencesRef.current.length) {
+        if (gen !== generationRef.current) return
+        const sentence = pendingSentencesRef.current.shift()
+        // 兜底：整条回复逐句处理超过 90 秒，直接显示剩余文字，不再等语音，避免界面像卡死
+        if (Date.now() - startedAt > 90000) {
+          setDisplayLen((d) => d + sentence.length)
+          continue
+        }
+        const audio = await prepareSpeechAudio(sentence)
+        if (gen !== generationRef.current) return
+        await revealSentenceWithAudio(sentence, audio, gen)
+      }
+    } finally {
+      processingRef.current = false
+      if (queueDoneResolveRef.current) {
+        const resolve = queueDoneResolveRef.current
+        queueDoneResolveRef.current = null
+        resolve()
+      }
+    }
+  }
+
+  function revealSentenceWithAudio(sentence, audio, gen) {
+    return new Promise((resolve) => {
+      const total = sentence.length
+      if (!audio || total === 0) {
+        setDisplayLen((d) => d + total)
+        resolve()
+        return
+      }
+      const applyPace = () => {
+        const durMs = (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 2) * 1000
+        const per = Math.min(120, Math.max(12, durMs / total))
+        playSpeechAudio(audio)
+        let shown = 0
+        const step = () => {
+          if (gen !== generationRef.current) return resolve()
+          shown += 1
+          setDisplayLen((d) => d + 1)
+          if (shown >= total) return resolve()
+          setTimeout(step, per)
+        }
+        step()
+      }
+      if (Number.isFinite(audio.duration) && audio.duration > 0) applyPace()
+      else {
+        audio.addEventListener('loadedmetadata', applyPace, { once: true })
+        // 兜底：元数据 2.5 秒内没就绪，按默认节奏继续，绝不让流程悬死
+        setTimeout(() => {
+          if (!Number.isFinite(audio.duration) || audio.duration <= 0) applyPace()
+        }, 2500)
+      }
+    })
+  }
 
   // M4：合成语音（主进程 Edge/克隆 TTS），返回可播放的 Audio；失败返回 null
   async function prepareSpeechAudio(text) {
@@ -134,10 +235,11 @@ export default function App() {
 
   useEffect(() => {
     ;(async () => {
-      const [history, appStatus, memoryFacts] = await Promise.all([
+      const [history, appStatus, memoryFacts, personaInfo] = await Promise.all([
         window.api.loadHistory(),
         window.api.getStatus(),
-        window.api.getMemories()
+        window.api.getMemories(),
+        window.api.getPersona()
       ])
       if (history && history.length > 0) {
         setMessages(history)
@@ -146,9 +248,40 @@ export default function App() {
       }
       setStatus(appStatus)
       setMemories(memoryFacts || [])
+      setPersonaState(personaInfo || { current: 'normal', personas: [] })
     })()
-    return window.api.onMemoryUpdated((facts) => setMemories(facts))
+    const offMemory = window.api.onMemoryUpdated((facts) => setMemories(facts))
+    const offPersona = window.api.onPersonaChanged((key) =>
+      setPersonaState((prev) => ({ ...prev, current: key }))
+    )
+    return () => {
+      offMemory()
+      offPersona()
+    }
   }, [])
+
+  // 人格切换：持久化 + 刷新状态显示
+  async function switchPersona(key) {
+    if (key === personaState.current) return
+    stopSpeak()
+    // 作废在途的流式回复/主动消息，避免串到新人格的对话框里
+    generationRef.current++
+    setTyping(false)
+    setStreamingIndex(null)
+    setDisplayLen(0)
+    setPendingReveal(null)
+    await window.api.setPersona(key)
+    setPersonaState((prev) => ({ ...prev, current: key }))
+    setStatus(await window.api.getStatus())
+    setMemories(await window.api.getMemories())
+    // 每个人格有自己独立的对话历史，切过来就加载各自的
+    const history = await window.api.loadHistory()
+    if (history && history.length > 0) {
+      setMessages(history)
+    } else {
+      setMessages([{ role: 'assistant', content: greeting(), ts: Date.now() }])
+    }
+  }
 
   // 新消息或打字状态变化时自动滚到底部
   useEffect(() => {
@@ -296,44 +429,119 @@ export default function App() {
     const withUser = [...messages, userMsg]
     setMessages(withUser)
     setTyping(true)
+    const syncMode = autoSpeak
     nextProactiveRef.current = Date.now() + IDLE_AFTER_CHAT_MS
     try {
       // M3 活人感：随机「思考」延迟，短消息快、长消息慢
       await sleep(600 + Math.min(2400, text.length * 25) + Math.random() * 1200)
       if (gen !== generationRef.current) return
-      const reply = await window.api.sendChat({ messages: withUser })
+
+      // M3 真·流式：先放一个空的绫华占位消息，模型边生成边逐字填入
+      const assistantIndex = withUser.length
+      const placeholder = { role: 'assistant', content: '', ts: Date.now(), streaming: true }
+      setMessages([...withUser, placeholder])
+      setStreamingIndex(assistantIndex)
+      setDisplayLen(0)
+      streamBufferRef.current = ''
+      pendingSentencesRef.current = []
+      const offDelta = window.api.onChatDelta(({ text }) => {
+        if (gen !== generationRef.current) return
+        setMessages((prev) =>
+          prev.map((m, i) => (i === assistantIndex ? { ...m, content: m.content + text } : m))
+        )
+        if (syncMode) {
+          // 开启朗读：句子入队，逐句音画同步
+          enqueueSentences(text)
+          processSentenceQueue(gen)
+        } else {
+          // 不朗读：文字随生成直接全量显示
+          setDisplayLen((prev) => prev + text.length)
+        }
+      })
+
+      let reply
+      try {
+        reply = await window.api.sendChat({ messages: withUser })
+      } finally {
+        offDelta()
+      }
       // 等待期间对话被清空或重新开始：丢弃这条迟到的回复
       if (gen !== generationRef.current) return
+
+      if (reply.content && reply.mode !== 'error') {
+        if (syncMode) {
+          // 末尾残句也入队，等语音全部播完再收尾，保证音画同步到底
+          if (streamBufferRef.current) {
+            pendingSentencesRef.current.push(streamBufferRef.current)
+            streamBufferRef.current = ''
+          }
+          processSentenceQueue(gen)
+          await waitQueueEmpty()
+          if (gen !== generationRef.current) return
+          setDisplayLen(reply.content.length)
+        }
+      }
+      setStreamingIndex(null)
       const final = [...withUser, { ...reply, ts: Date.now() }]
-      if (reply.content && reply.mode !== 'error') setPendingReveal(final.length - 1)
       setMessages(final)
       await window.api.saveHistory(final)
       setMemories(await window.api.getMemories())
-      if (reply.content && reply.mode !== 'error') {
-        if (autoSpeak) {
-          // 同步呈现：先等语音就绪，再让文字和语音同时开始
-          prepareSpeechAudio(reply.content).then((audio) => {
-            if (gen !== generationRef.current) return
-            if (audio) {
-              startReveal(final.length - 1, reply.content, () => setTyping(false))
-              syncRevealWithAudio(audio, reply.content)
-              playSpeechAudio(audio)
-            } else {
-              startReveal(final.length - 1, reply.content, () => setTyping(false))
-              speakFallback(stripStageDirections(reply.content))
-            }
-          })
-        } else {
-          startReveal(final.length - 1, reply.content, () => setTyping(false))
-        }
-      } else {
-        setTyping(false)
-      }
+      setTyping(false)
     } catch (err) {
       if (gen !== generationRef.current) return
       const final = [
         ...withUser,
         { role: 'assistant', content: `（本地出了点问题：${err.message}）`, ts: Date.now(), mode: 'error' }
+      ]
+      setMessages(final)
+      await window.api.saveHistory(final)
+      setTyping(false)
+    }
+  }
+
+  // M6 本地出图：把请求发到 SD WebUI，生成图片作为一条绫华的消息
+  async function handleGenerateImage(text, keys = []) {
+    if (typing) return
+    stopSpeak()
+    const gen = generationRef.current
+    const typed = (text || '').trim()
+    if (!typed) {
+      showTtsNotice('没写描述，画了一张默认的。下次先把想看的画面写进输入框，再点「发图」')
+    }
+    const req = typed || '让我看看你现在的样子'
+    const isIntimate = personaState.current === 'intimate'
+    const selNote = isIntimate && keys.length ? `（画面提示：${keys.join('、')}）` : ''
+    const userMsg = { role: 'user', content: `${req}${selNote}`, ts: Date.now() }
+    const withUser = [...messagesRef.current, userMsg]
+    setMessages(withUser)
+    setTyping(true)
+    nextProactiveRef.current = Date.now() + IDLE_AFTER_CHAT_MS
+    try {
+      const res = await window.api.generateImage({
+        request: req,
+        width: 512,
+        height: 768,
+        keys: isIntimate ? keys : []
+      })
+      if (gen !== generationRef.current) return
+      const imgMsg = {
+        role: 'assistant',
+        content: '（刚画好的，给你。）',
+        image: res.imageBase64,
+        mime: res.mime || 'image/png',
+        ts: Date.now()
+      }
+      const final = [...withUser, imgMsg]
+      setMessages(final)
+      await window.api.saveHistory(final)
+      setMemories(await window.api.getMemories())
+      if (autoSpeak) speak(imgMsg.content)
+      setTyping(false)
+    } catch (err) {
+      if (gen !== generationRef.current) return
+      const final = [
+        ...withUser,
+        { role: 'assistant', content: `（出图失败：${err.message}）`, mode: 'error', ts: Date.now() }
       ]
       setMessages(final)
       await window.api.saveHistory(final)
@@ -350,6 +558,8 @@ export default function App() {
       // 作废等待中的回复，并解除可能卡住的输入锁定
       generationRef.current++
       setTyping(false)
+      setStreamingIndex(null)
+      setDisplayLen(0)
       setMessages([{ role: 'assistant', content: greeting(), ts: Date.now() }])
       setShowMemories(false)
     } catch (err) {
@@ -369,12 +579,23 @@ export default function App() {
             <div className="status">
               <span className={`dot ${status.mode === 'real' ? 'online' : 'mock'}`} />
               {status.mode === 'real'
-                ? `模型已连接 · ${status.model}`
+                ? `${personaState.current === 'intimate' ? '私密' : '日常'}模式 · ${status.model}`
                 : '本地模拟模式（配置 .env 后接入真实模型）'}
             </div>
           </div>
         </div>
         <div className="header-actions">
+          <div className="persona-switch">
+            {personaState.personas.map((p) => (
+              <button
+                key={p.key}
+                className={`persona-btn ${personaState.current === p.key ? 'active' : ''}`}
+                onClick={() => switchPersona(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <button
             className={`memory-btn ${autoSpeak ? 'active' : ''}`}
             onClick={() => setAutoSpeak(!autoSpeak)}
@@ -444,7 +665,13 @@ export default function App() {
         {messages.map((msg, i) => {
           if (pendingReveal === i) return null // 语音就绪前不显示，用打字点点代替
           const animating = reveal !== null && reveal.index === i
-          const content = animating ? msg.content.slice(0, reveal.count) : msg.content
+          if (streamingIndex === i && displayLen === 0) return null
+          const content =
+            animating && reveal !== null
+              ? msg.content.slice(0, reveal.count)
+              : streamingIndex === i
+                ? msg.content.slice(0, displayLen)
+                : msg.content
           return (
             <ChatMessage
               key={i}
@@ -454,7 +681,7 @@ export default function App() {
             />
           )
         })}
-        {typing && !reveal && (
+        {typing && !reveal && (streamingIndex === null || displayLen === 0) && (
           <div className="message-row assistant">
             <img className="avatar-img" src={avatar} alt={character.name} />
             <div className="bubble-wrap">
@@ -471,7 +698,13 @@ export default function App() {
 
       {ttsNotice && <div className="tts-notice">{ttsNotice}</div>}
 
-      <MessageInput disabled={typing} onSend={handleSend} onActivity={handleActivity} />
+      <MessageInput
+        key={personaState.current}
+        disabled={typing}
+        onSend={handleSend}
+        onGenerateImage={handleGenerateImage}
+        onActivity={handleActivity}
+      />
 
       {confirming && (
         <div className="overlay" onClick={() => setConfirming(false)}>

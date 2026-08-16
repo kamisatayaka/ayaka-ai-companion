@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('api', {
   sendChat: (payload) => ipcRenderer.invoke('chat:send', payload),
   sendProactive: () => ipcRenderer.invoke('chat:proactive'),
+  generateImage: (payload) => ipcRenderer.invoke('image:generate', payload),
   transcribeAudio: (audio) => ipcRenderer.invoke('stt:transcribe', audio),
   speak: (text) => ipcRenderer.invoke('tts:speak', { text }),
   showMainWindow: () => ipcRenderer.invoke('window:show-main'),
@@ -13,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   loadHistory: () => ipcRenderer.invoke('history:load'),
   saveHistory: (messages) => ipcRenderer.invoke('history:save', messages),
   getStatus: () => ipcRenderer.invoke('app:status'),
+  getPersona: () => ipcRenderer.invoke('persona:get'),
+  setPersona: (key) => ipcRenderer.invoke('persona:set', key),
   getMemories: () => ipcRenderer.invoke('memory:list'),
   deleteMemory: (id) => ipcRenderer.invoke('memory:delete', id),
   updateMemory: (id, patch) => ipcRenderer.invoke('memory:update', id, patch),
@@ -20,5 +23,15 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event, facts) => callback(facts)
     ipcRenderer.on('memory:updated', listener)
     return () => ipcRenderer.removeListener('memory:updated', listener)
+  },
+  onChatDelta: (callback) => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('chat:delta', listener)
+    return () => ipcRenderer.removeListener('chat:delta', listener)
+  },
+  onPersonaChanged: (callback) => {
+    const listener = (_event, key) => callback(key)
+    ipcRenderer.on('persona:changed', listener)
+    return () => ipcRenderer.removeListener('persona:changed', listener)
   }
 })

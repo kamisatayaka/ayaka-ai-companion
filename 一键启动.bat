@@ -34,6 +34,12 @@ goto after_server
 echo       Server is ready (logs: voice-clone\server.log).
 :after_server
 
+rem ---------- 1.5 SD WebUI (Forge, hidden, logs to file) ----------
+if exist "userdata\sd-webui\webui.bat" (
+    echo [1.5/4] Checking image service...
+    call "userdata\scripts\start-sd.bat"
+)
+
 rem ---------- 2. Check Node.js ----------
 where node >nul 2>nul
 if errorlevel 1 (

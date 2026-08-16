@@ -5,11 +5,13 @@ import { app, BrowserWindow, ipcMain, Menu, screen, session, Tray } from 'electr
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
+import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { character, buildSystemPrompt, buildFewShotMessages } from '../src/shared/character.js'
 import { buildExtractPrompt } from '../src/shared/memoryPrompt.js'
 import { applyOps, guessCategory, reviewFact } from '../src/shared/memory.js'
 import { stripStageDirections } from '../src/shared/ttsFilter.js'
+import { buildImagePrompt, NEGATIVE_PROMPT, NSFW_NEGATIVE } from '../src/shared/imagePrompt.js'
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -18,8 +20,22 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getAppPath(), 'userdata'))
 }
-const historyFile = () => path.join(app.getPath('userData'), 'history.json')
-const memoryFile = () => path.join(app.getPath('userData'), 'memory.json')
+// 历史记录按人格分开：日常沿用 history.json，私密用 history-intimate.json
+const historyFile = (personaKey) => {
+  const key = personaKey || activePersona()
+  return path.join(
+    app.getPath('userData'),
+    key === 'normal' ? 'history.json' : `history-${key}.json`
+  )
+}
+// 记忆也按人格分开，防止私密对话提炼的记忆污染日常人格
+const memoryFile = (personaKey) => {
+  const key = personaKey || activePersona()
+  return path.join(
+    app.getPath('userData'),
+    key === 'normal' ? 'memory.json' : `memory-${key}.json`
+  )
+}
 
 // 读取 JSON 前剥离 BOM（有些编辑器/脚本会写入带 BOM 的 UTF-8，JSON.parse 会失败）
 function readJson(file) {
@@ -111,35 +127,65 @@ function loadEnvFile() {
   }
 }
 
-// ---------- 大模型调用（OpenAI 兼容接口） ----------
-const BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/+$/, '')
-const MODEL = process.env.OPENAI_MODEL || 'deepseek-chat'
+// 必须在读取任何配置常量之前加载 .env，否则会拿到默认值（比如 401 打去 DeepSeek）
+loadEnvFile()
 
-function hasApiKey() {
-  return !!(
-    process.env.OPENAI_API_KEY ||
-    process.env.DEEPSEEK_API_KEY ||
-    // 本地模型（Ollama 等）不需要 Key，指向 localhost 即视为已连接
-    /localhost|127\.0\.0\.1/.test(process.env.OPENAI_BASE_URL || '')
-  )
+// ---------- 人格配置（人格 ⇄ 模型厂商 ⇄ 人设提示词） ----------
+const PERSONAS = {
+  normal: {
+    label: '日常',
+    baseUrl: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    key: () => process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || ''
+  },
+  intimate: {
+    label: '私密',
+    baseUrl: 'http://localhost:11434/v1',
+    model: 'huihui_ai/qwen2.5-abliterate:7b',
+    key: () => ''
+  }
+}
+
+const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
+function loadSettings() {
+  try {
+    return readJson(settingsFile())
+  } catch {
+    return {}
+  }
+}
+function saveSettings(settings) {
+  fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2), 'utf-8')
+}
+function activePersona() {
+  const p = loadSettings().persona
+  return PERSONAS[p] ? p : 'normal'
+}
+function getPersonaConfig(personaKey = activePersona()) {
+  const p = PERSONAS[personaKey] || PERSONAS.normal
+  return { baseUrl: p.baseUrl, model: p.model, key: p.key() }
+}
+function hasApiKey(cfg = getPersonaConfig()) {
+  return !!(cfg.key || /localhost|127\.0\.0\.1/.test(cfg.baseUrl))
 }
 
 async function callOpenAICompatible(
   apiMessages,
-  { temperature = 0.9, maxTokens = 800, timeoutMs = 60000 } = {}
+  { temperature = 0.9, maxTokens = 800, timeoutMs = 60000 } = {},
+  cfg
 ) {
-  const key = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY
+  const { baseUrl, model, key } = cfg || getPersonaConfig()
   // 超时保护：模型请求卡住时自动中止，避免前端永远处于「等待中」无法输入
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const headers = { 'Content-Type': 'application/json' }
     if (key) headers.Authorization = `Bearer ${key}`
-    const res = await fetch(`${BASE_URL}/chat/completions`, {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: apiMessages,
         temperature,
         max_tokens: maxTokens,
@@ -156,6 +202,72 @@ async function callOpenAICompatible(
     const data = await res.json()
     const content = data.choices?.[0]?.message?.content ?? ''
     return { role: 'assistant', content, mode: 'real' }
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('请求超时，请稍后重试')
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// M3 真·流式：模型边生成边把文字增量推给前端，体感不再「干等整段」
+async function streamChatCompletions(
+  apiMessages,
+  onDelta,
+  { temperature = 0.9, maxTokens = 800, timeoutMs = 180000 } = {},
+  cfg
+) {
+  const { baseUrl, model, key } = cfg || getPersonaConfig()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    if (key) headers.Authorization = `Bearer ${key}`
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: apiMessages,
+        temperature,
+        max_tokens: maxTokens,
+        stream: true
+      }),
+      signal: controller.signal
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`HTTP ${res.status} ${text.slice(0, 200)}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let full = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+        const payload = trimmed.slice(5).trim()
+        if (!payload || payload === '[DONE]') continue
+        try {
+          const json = JSON.parse(payload)
+          const delta = json.choices?.[0]?.delta?.content
+          if (delta) {
+            full += delta
+            onDelta(delta)
+          }
+        } catch {
+          // 个别无法解析的 SSE 行直接跳过，不打断对话
+        }
+      }
+    }
+    return full
   } catch (err) {
     if (err.name === 'AbortError') throw new Error('请求超时，请稍后重试')
     throw err
@@ -187,7 +299,8 @@ async function extractFacts(messages, currentFacts = []) {
       { role: 'system', content: buildExtractPrompt(currentFacts) },
       ...messages.slice(-30)
     ],
-    { temperature: 0.3, maxTokens: 600 }
+    { temperature: 0.3, maxTokens: 600 },
+    getPersonaConfig()
   )
   const cleaned = data.content
     .trim()
@@ -254,15 +367,19 @@ async function rememberAsync(messages, userCount) {
 
 // ---------- IPC：前端通过这里和主进程通信 ----------
 ipcMain.handle('chat:send', async (_event, { messages = [] } = {}) => {
+  // 图片等富字段不发给模型（base64 太占 token）
+  const plain = messages.map((m) => ({ role: m.role, content: m.content }))
   // 成本控制：只保留最近 40 条（约 20 轮），防止上下文无限膨胀
-  const recent = messages.slice(-40)
+  const recent = plain.slice(-40)
   const memory = loadMemory()
+  const personaKey = activePersona()
+  const cfg = getPersonaConfig(personaKey)
 
   // 组装：人设卡 + few-shot 示例 + 最近历史
   const apiMessages = [
-    { role: 'system', content: buildSystemPrompt() },
+    { role: 'system', content: buildSystemPrompt(undefined, personaKey) },
     // few-shot：先给模型看几条绫华的对话范本，再进入真实对话
-    ...buildFewShotMessages(),
+    ...buildFewShotMessages(personaKey),
     ...recent
   ]
 
@@ -290,13 +407,18 @@ ipcMain.handle('chat:send', async (_event, { messages = [] } = {}) => {
     }
   }
 
-  if (!hasApiKey()) return mockReply(recent)
+  if (!hasApiKey(cfg)) return mockReply(recent)
 
   let reply
   try {
-    reply = await callOpenAICompatible(apiMessages)
+    // M3 流式输出：模型边生成边把文字推给前端，不用等整段完成
+    const sender = _event.sender
+    const full = await streamChatCompletions(apiMessages, (text) => {
+      if (!sender.isDestroyed()) sender.send('chat:delta', { text })
+    }, {}, cfg)
+    reply = { role: 'assistant', content: full, mode: 'real' }
   } catch (err) {
-    return {
+    reply = {
       role: 'assistant',
       content: `（模型调用出错：${err.message}）`,
       mode: 'error'
@@ -306,27 +428,95 @@ ipcMain.handle('chat:send', async (_event, { messages = [] } = {}) => {
   // M2：每条用户消息后都提炼一次记忆（用户要求，牺牲一点成本换及时性）
   const userCount = recent.filter((m) => m.role === 'user').length
   if (userCount - memory.processedUserCount >= 1) {
-    rememberAsync(messages, userCount)
+    rememberAsync(plain, userCount)
   }
   return reply
+})
+
+// ---------- 本地出图（Stable Diffusion WebUI Forge，127.0.0.1:7860） ----------
+ipcMain.handle('image:generate', async (_event, { request = '', width = 512, height = 768, keys = [] } = {}) => {
+  const sdUrl = (process.env.SD_URL || 'http://127.0.0.1:7860').replace(/\/+$/, '')
+  // 私密人格出裸图，日常人格出正常图
+  const nsfw = activePersona() === 'intimate'
+  // 4GB 显存放不下聊天模型+出图模型：出图前先把 Ollama 模型卸掉，把显存让给 SD
+  try {
+    const ps = await fetch('http://localhost:11434/api/ps', {
+      signal: AbortSignal.timeout(5000)
+    })
+      .then((r) => r.json())
+      .catch(() => null)
+    for (const m of ps?.models || []) {
+      await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: m.name, keep_alive: 0 })
+      }).catch(() => {})
+    }
+  } catch {}
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 300000)
+  try {
+    const res = await fetch(`${sdUrl}/sdapi/v1/txt2img`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: buildImagePrompt(request, { nsfw, keys }),
+        negative_prompt: nsfw ? `${NEGATIVE_PROMPT}, ${NSFW_NEGATIVE}` : NEGATIVE_PROMPT,
+        width: Math.max(384, Math.min(768, Number(width) || 512)),
+        height: Math.max(384, Math.min(1024, Number(height) || 768)),
+        steps: 26,
+        cfg_scale: 7,
+        sampler_name: 'DPM++ 2M Karras',
+        seed: -1
+      }),
+      signal: controller.signal
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`出图服务错误 HTTP ${res.status} ${text.slice(0, 120)}`)
+    }
+    const data = await res.json()
+    const b64 = data.images?.[0]
+    if (!b64) throw new Error('出图服务没有返回图片')
+    return { imageBase64: b64, mime: 'image/png' }
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('出图超时（服务正在加载模型，请稍后重试）')
+    if (err.cause?.code === 'ECONNREFUSED' || /fetch failed|ECONNREFUSED/i.test(String(err.message))) {
+      throw new Error('出图服务未启动（SD WebUI 未运行）')
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 })
 
 // M3 活人感：绫华主动发消息（不需要用户输入）
 ipcMain.handle('chat:proactive', async () => {
   const memory = loadMemory()
+  const personaKey = activePersona()
+  const cfg = getPersonaConfig(personaKey)
+  // 带上最近对话历史，让主动消息接着上文说，而不是凭空开场
+  let recent = []
+  try {
+    const history = readJson(historyFile())
+    recent = (Array.isArray(history) ? history : [])
+      .slice(-8)
+      .map((m) => ({ role: m.role, content: m.content }))
+  } catch {}
   const systemParts = [
-    buildSystemPrompt(),
-    '现在由你（绫华）主动给旅行者发一条消息：自然地开启一个话题，可以结合当前时间、天气氛围或你记得的事，一两句话即可，不要问一连串问题，不要太过刻意。'
+    buildSystemPrompt(undefined, personaKey),
+    '现在由你（绫华）主动给旅行者发一条消息：接着刚才的对话自然地延续下去，可以结合当前时间、天气氛围或你记得的事，一两句话即可，不要问一连串问题，不要太过刻意。'
   ]
   const memoryPrompt = buildMemoryPrompt(memory)
   if (memoryPrompt) systemParts.push(memoryPrompt)
   const apiMessages = [
     { role: 'system', content: systemParts.join('\n\n') },
-    ...buildFewShotMessages(),
-    { role: 'user', content: '（现在是绫华主动给旅行者发消息的时候，由绫华直接发出一条自然的开场消息）' }
+    ...buildFewShotMessages(personaKey),
+    ...recent,
+    { role: 'user', content: '（现在轮到你主动开口了：接着上面聊的内容，直接发一条自然的消息，不要复述、不要问号轰炸）' }
   ]
 
-  if (!hasApiKey()) {
+  if (!hasApiKey(cfg)) {
     const PROACTIVE_MOCKS = [
       '忽然想到，今日的茶点还没尝过，旅行者要来一块吗？',
       '雨停了，庭院里的空气干净得很。你那边天气如何？',
@@ -340,7 +530,7 @@ ipcMain.handle('chat:proactive', async () => {
   }
 
   try {
-    return await callOpenAICompatible(apiMessages, { temperature: 1.0, maxTokens: 300 })
+    return await callOpenAICompatible(apiMessages, { temperature: 1.0, maxTokens: 300 }, cfg)
   } catch (err) {
     return { role: 'assistant', content: `（主动消息发送失败：${err.message}）`, mode: 'error' }
   }
@@ -388,7 +578,7 @@ async function cloneTts(text, endpoint) {
   url.searchParams.set('text_lang', 'zh')
   url.searchParams.set('prompt_lang', 'zh')
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 60000)
+  const timer = setTimeout(() => controller.abort(), 25000)
   try {
     const res = await fetch(url, { method: 'GET', signal: controller.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -465,10 +655,35 @@ ipcMain.handle('history:save', async (_event, messages) => {
   return true
 })
 
-ipcMain.handle('app:status', async () => ({
-  mode: hasApiKey() ? 'real' : 'mock',
-  model: MODEL
+ipcMain.handle('app:status', async () => {
+  const cfg = getPersonaConfig()
+  return {
+    mode: hasApiKey(cfg) ? 'real' : 'mock',
+    model: cfg.model,
+    persona: activePersona()
+  }
+})
+
+// 人格切换：读取当前 / 切换并持久化
+ipcMain.handle('persona:get', async () => ({
+  current: activePersona(),
+  personas: Object.entries(PERSONAS).map(([key, p]) => ({
+    key,
+    label: p.label,
+    model: p.model
+  }))
 }))
+
+ipcMain.handle('persona:set', async (_event, key) => {
+  if (!PERSONAS[key]) return { error: '未知人格' }
+  const settings = loadSettings()
+  settings.persona = key
+  saveSettings(settings)
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('persona:changed', key)
+  }
+  return { ok: true }
+})
 
 ipcMain.handle('memory:list', async () => loadMemory().facts)
 
@@ -618,6 +833,16 @@ function updateTrayMenu() {
       },
       { type: 'separator' },
       {
+        label: '退出并关闭后台服务',
+        click: () => {
+          isQuitting = true
+          // 按端口关闭音色克隆(9880)与 SD 出图(7860)，Ollama 是独立常驻工具，不动它
+          killServiceOnPort(9880)
+          killServiceOnPort(7860)
+          app.quit()
+        }
+      },
+      {
         label: '退出',
         click: () => {
           isQuitting = true
@@ -626,6 +851,27 @@ function updateTrayMenu() {
       }
     ])
   )
+}
+
+// 找出监听指定端口的进程并结束（含子进程树），找不到就静默跳过
+function killServiceOnPort(port) {
+  try {
+    const out = execSync(
+      `netstat -ano | findstr :${port} | findstr LISTENING`,
+      { encoding: 'utf8', windowsHide: true }
+    )
+    const pids = new Set()
+    for (const line of out.split(/\r?\n/)) {
+      const parts = line.trim().split(/\s+/)
+      const pid = parts[parts.length - 1]
+      if (/^\d+$/.test(pid)) pids.add(pid)
+    }
+    for (const pid of pids) {
+      try {
+        execSync(`taskkill /PID ${pid} /F /T`, { windowsHide: true })
+      } catch {}
+    }
+  } catch {}
 }
 
 function createTray() {
